@@ -1,0 +1,38 @@
+# Core ML and Data Processing
+torch
+transformers
+datasets
+pandas
+numpy
+scikit-learn
+
+# NLP Metrics and Evaluation
+nltk
+rouge-score
+sacrebleu
+
+# Web Application
+streamlit
+streamlit-extras
+
+# PDF Generation
+fpdf
+reportlab
+
+# Experiment Tracking and Visualization
+wandb
+matplotlib
+seaborn
+
+# Progress and Utils
+tqdm
+python-dotenv
+
+# Data Handling
+protobuf
+PyYAML
+
+# Optional: For development
+black
+flake8
+pytest
