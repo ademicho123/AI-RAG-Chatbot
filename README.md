@@ -1,1 +1,1 @@
-# AI-Resume-Generator
+This tool creates tailored, high-quality resumes instantly.
