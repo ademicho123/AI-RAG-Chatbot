@@ -7,8 +7,8 @@ import re
 class ResumeGenerator:
     def __init__(self):
         # Load the fine-tuned model and tokenizer
-        self.model = AutoModelForCausalLM.from_pretrained("path_to_finetuned_model")
-        self.tokenizer = AutoTokenizer.from_pretrained("path_to_finetuned_model")
+        self.model = AutoModelForCausalLM.from_pretrained("./model")
+        self.tokenizer = AutoTokenizer.from_pretrained("./model")
         
     def generate_resume(self, job_title):
         # Prepare the prompt
