@@ -1,0 +1,15 @@
+{"time":"2024-10-31T23:31:22.916355031Z","level":"INFO","msg":"using version","core version":"0.18.5"}
+{"time":"2024-10-31T23:31:22.916411927Z","level":"INFO","msg":"created symlink","path":"/workspaces/AI-Resume-Generator/wandb/offline-run-20241031_233122-jtsktw55/logs/debug-core.log"}
+{"time":"2024-10-31T23:31:23.030206438Z","level":"INFO","msg":"created new stream","id":"jtsktw55"}
+{"time":"2024-10-31T23:31:23.030257483Z","level":"INFO","msg":"stream: started","id":"jtsktw55"}
+{"time":"2024-10-31T23:31:23.030298432Z","level":"INFO","msg":"handler: started","stream_id":{"value":"jtsktw55"}}
+{"time":"2024-10-31T23:31:23.031154837Z","level":"INFO","msg":"sender: started","stream_id":"jtsktw55"}
+{"time":"2024-10-31T23:31:23.031156152Z","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"jtsktw55"}}
+{"time":"2024-10-31T23:31:23.039267215Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-10-31T23:31:23.537695711Z","level":"INFO","msg":"stream: closing","id":"jtsktw55"}
+{"time":"2024-10-31T23:31:23.537741413Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-10-31T23:31:23.538327991Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-10-31T23:31:23.538546398Z","level":"INFO","msg":"handler: closed","stream_id":{"value":"jtsktw55"}}
+{"time":"2024-10-31T23:31:23.538572937Z","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"jtsktw55"}}
+{"time":"2024-10-31T23:31:23.53859184Z","level":"INFO","msg":"sender: closed","stream_id":"jtsktw55"}
+{"time":"2024-10-31T23:31:23.538655181Z","level":"INFO","msg":"stream: closed","id":"jtsktw55"}

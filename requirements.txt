@@ -36,3 +36,4 @@ PyYAML
 black
 flake8
 pytest
+accelerate

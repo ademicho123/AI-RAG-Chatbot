@@ -1,4 +1,3 @@
-# train.py
 import pandas as pd
 import numpy as np
 from transformers import (
@@ -6,119 +5,219 @@ from transformers import (
     AutoModelForCausalLM,
     TrainingArguments, 
     Trainer,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    TrainerCallback
 )
 import torch
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-import wandb
-import matplotlib.pyplot as plt
-import seaborn as sns
 from nltk.translate.bleu_score import sentence_bleu
 from rouge_score import rouge_scorer
 import json
 import os
 from tqdm import tqdm
+from datetime import datetime
 
-class MetricsCallback:
-    """Custom callback to track metrics during training"""
-    def __init__(self):
-        self.training_loss = []
-        self.validation_loss = []
-        self.learning_rates = []
-        self.bleu_scores = []
-        self.rouge_scores = []
+class MetricsLogger(TrainerCallback):
+    """Custom callback to log BLEU and ROUGE scores during training"""
+    def __init__(self, tokenizer, eval_dataset, log_dir="./logs"):
+        self.tokenizer = tokenizer
+        self.eval_dataset = eval_dataset
+        self.log_dir = log_dir
+        self.scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+        self.metrics_history = {
+            'steps': [],
+            'loss': [],
+            'bleu': [],
+            'rouge1': [],
+            'rouge2': [],
+            'rougeL': []
+        }
         
-    def on_log(self, args, state, control, logs=None):
-        if logs is not None:
-            if 'loss' in logs:
-                self.training_loss.append(logs['loss'])
-            if 'eval_loss' in logs:
-                self.validation_loss.append(logs['eval_loss'])
-            if 'learning_rate' in logs:
-                self.learning_rates.append(logs['learning_rate'])
+        # Create log directory if it doesn't exist
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Initialize log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = os.path.join(log_dir, f'training_metrics_{timestamp}.log')
+        with open(self.log_file, 'w') as f:
+            f.write("step,loss,bleu,rouge1,rouge2,rougeL\n")
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is not None and state.is_world_process_zero:
+            step = state.global_step
+            
+            # Calculate metrics
+            metrics = self.calculate_metrics(kwargs.get('model'))
+            
+            # Update metrics history
+            self.metrics_history['steps'].append(step)
+            self.metrics_history['loss'].append(logs.get('loss', 0))
+            self.metrics_history['bleu'].append(metrics['bleu'])
+            self.metrics_history['rouge1'].append(metrics['rouge1'])
+            self.metrics_history['rouge2'].append(metrics['rouge2'])
+            self.metrics_history['rougeL'].append(metrics['rougeL'])
+            
+            # Log to file
+            with open(self.log_file, 'a') as f:
+                f.write(f"{step},{logs.get('loss', 0):.4f},{metrics['bleu']:.4f},"
+                       f"{metrics['rouge1']:.4f},{metrics['rouge2']:.4f},{metrics['rougeL']:.4f}\n")
+            
+            # Print current metrics
+            print(f"\nStep {step}:")
+            print(f"Loss: {logs.get('loss', 0):.4f}")
+            print(f"BLEU: {metrics['bleu']:.4f}")
+            print(f"ROUGE-1: {metrics['rouge1']:.4f}")
+            print(f"ROUGE-2: {metrics['rouge2']:.4f}")
+            print(f"ROUGE-L: {metrics['rougeL']:.4f}")
+
+    def calculate_metrics(self, model, num_samples=5):
+        """Calculate BLEU and ROUGE scores on a subset of the evaluation dataset"""
+        eval_subset = self.eval_dataset.select(range(min(num_samples, len(self.eval_dataset))))
+        
+        bleu_scores = []
+        rouge1_scores = []
+        rouge2_scores = []
+        rougeL_scores = []
+        
+        for item in eval_subset:
+            # Generate text
+            input_ids = torch.tensor([item['input_ids']]).to(model.device)
+            generated = model.generate(
+                input_ids,
+                max_length=512,
+                num_return_sequences=1,
+                temperature=0.7
+            )
+            
+            # Decode generated text
+            generated_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
+            reference_text = self.tokenizer.decode(item['labels'], skip_special_tokens=True)
+            
+            # Calculate BLEU
+            bleu = sentence_bleu([reference_text.split()], generated_text.split())
+            bleu_scores.append(bleu)
+            
+            # Calculate ROUGE
+            rouge_scores = self.scorer.score(reference_text, generated_text)
+            rouge1_scores.append(rouge_scores['rouge1'].fmeasure)
+            rouge2_scores.append(rouge_scores['rouge2'].fmeasure)
+            rougeL_scores.append(rouge_scores['rougeL'].fmeasure)
+        
+        return {
+            'bleu': np.mean(bleu_scores),
+            'rouge1': np.mean(rouge1_scores),
+            'rouge2': np.mean(rouge2_scores),
+            'rougeL': np.mean(rougeL_scores)
+        }
+
+    def save_final_metrics(self):
+        """Save the complete metrics history to a JSON file"""
+        metrics_file = os.path.join(self.log_dir, 'final_metrics.json')
+        with open(metrics_file, 'w') as f:
+            json.dump(self.metrics_history, f, indent=2)
 
 class ResumeTrainer:
-    def __init__(self, model_name="meta-llama/Llama-2-7b", output_dir="./resume_generator_model"):
+    def __init__(self, model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", output_dir="./resume_generator_model"):
         self.model_name = model_name
         self.output_dir = output_dir
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.metrics_callback = MetricsCallback()
-        self.scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
         
-        # Initialize wandb for experiment tracking
-        wandb.init(project="resume-generator", name="llama-finetuning")
+        print(f"Loading model and tokenizer from {model_name}")
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            padding_side="left"
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            device_map="auto",
+            torch_dtype=torch.float16
+        )
+        
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.model.config.pad_token_id = self.tokenizer.eos_token_id
 
     def prepare_data(self, data_path):
         """Prepare and validate the dataset"""
-        df = pd.read_csv(data_path)
-        
-        # Data validation
-        print("Dataset Statistics:")
-        print(f"Total samples: {len(df)}")
-        print(f"Unique job titles: {df['Job Title'].nunique()}")
-        print("\nSample lengths distribution:")
-        df['resume_length'] = df['Resume'].str.len()
-        print(df['resume_length'].describe())
-        
-        # Format data
-        def format_example(row):
-            return {
-                'input': f"Generate a resume for {row['Job Title']}:",
-                'output': row['Resume']
-            }
-        
-        formatted_data = df.apply(format_example, axis=1).tolist()
-        
-        # Split data
-        train_data, val_data = train_test_split(
-            formatted_data,
-            test_size=0.1,
-            random_state=42
-        )
-        
-        return train_data, val_data
+        try:
+            encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+            df = None
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(data_path, encoding=encoding)
+                    print(f"Successfully read CSV with {encoding} encoding")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if df is None:
+                raise ValueError("Could not read CSV file with any attempted encoding")
+            
+            print("\nDataset Statistics:")
+            print(f"Total samples: {len(df)}")
+            print(f"Unique job titles: {df['Job Title'].nunique()}")
+            
+            # Convert to lists for easier processing
+            job_titles = df['Job Title'].tolist()
+            resumes = df['Resume'].tolist()
+            
+            # Create input-output pairs
+            formatted_data = []
+            for title, resume in zip(job_titles, resumes):
+                formatted_data.append({
+                    'input_text': f"Generate a resume for {title}:",
+                    'output_text': str(resume)  # Ensure resume is string
+                })
+            
+            # Split the data
+            train_data, val_data = train_test_split(
+                formatted_data,
+                test_size=0.1,
+                random_state=42
+            )
+            
+            return train_data, val_data
+            
+        except Exception as e:
+            print(f"Error loading data: {str(e)}")
+            raise
 
-    def compute_metrics(self, eval_pred):
-        """Compute various metrics for evaluation"""
-        predictions, labels = eval_pred
-        decoded_preds = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
-        decoded_labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
-        
-        # Calculate BLEU scores
-        bleu_scores = [
-            sentence_bleu([ref.split()], pred.split())
-            for ref, pred in zip(decoded_labels, decoded_preds)
-        ]
-        
-        # Calculate ROUGE scores
-        rouge_scores = [
-            self.scorer.score(ref, pred)
-            for ref, pred in zip(decoded_labels, decoded_preds)
-        ]
-        
-        # Calculate perplexity
-        loss = torch.nn.CrossEntropyLoss()(
-            torch.tensor(predictions).view(-1, self.model.config.vocab_size),
-            torch.tensor(labels).view(-1)
-        )
-        perplexity = torch.exp(loss)
-        
-        metrics = {
-            'bleu': np.mean(bleu_scores),
-            'rouge1': np.mean([score['rouge1'].fmeasure for score in rouge_scores]),
-            'rouge2': np.mean([score['rouge2'].fmeasure for score in rouge_scores]),
-            'rougeL': np.mean([score['rougeL'].fmeasure for score in rouge_scores]),
-            'perplexity': perplexity.item()
+    def tokenize_data(self, examples):
+        """Tokenize the data properly"""
+        model_inputs = {
+            'input_ids': [],
+            'labels': []
         }
         
-        return metrics
+        for example in examples:
+            # Tokenize input text
+            input_ids = self.tokenizer(
+                example['input_text'],
+                truncation=True,
+                max_length=512,
+                padding='max_length',
+                return_tensors='pt'
+            )['input_ids'].squeeze()
+            
+            # Tokenize output text
+            labels = self.tokenizer(
+                example['output_text'],
+                truncation=True,
+                max_length=512,
+                padding='max_length',
+                return_tensors='pt'
+            )['input_ids'].squeeze()
+            
+            model_inputs['input_ids'].append(input_ids)
+            model_inputs['labels'].append(labels)
+        
+        return model_inputs
 
     def train(self, train_data, val_data):
-        """Train the model with comprehensive metrics tracking"""
-        # Setup training arguments
+        """Train the model with metric logging"""
         training_args = TrainingArguments(
             output_dir=self.output_dir,
             num_train_epochs=3,
@@ -134,19 +233,28 @@ class ResumeTrainer:
             save_total_limit=2,
             load_best_model_at_end=True,
             metric_for_best_model="eval_loss",
-            report_to="wandb"
+            # Disable wandb
+            report_to="none",
+            run_name=None
         )
+        
+        # Tokenize the datasets
+        train_tokenized = self.tokenize_data(train_data)
+        val_tokenized = self.tokenize_data(val_data)
         
         # Create datasets
         train_dataset = Dataset.from_dict({
-            'input_ids': [self.tokenizer(x['input'])['input_ids'] for x in train_data],
-            'labels': [self.tokenizer(x['output'])['input_ids'] for x in train_data]
+            'input_ids': train_tokenized['input_ids'],
+            'labels': train_tokenized['labels']
         })
         
         val_dataset = Dataset.from_dict({
-            'input_ids': [self.tokenizer(x['input'])['input_ids'] for x in val_data],
-            'labels': [self.tokenizer(x['output'])['input_ids'] for x in val_data]
+            'input_ids': val_tokenized['input_ids'],
+            'labels': val_tokenized['labels']
         })
+        
+        # Initialize metrics logger
+        metrics_logger = MetricsLogger(self.tokenizer, val_dataset)
         
         # Initialize trainer
         trainer = Trainer(
@@ -155,98 +263,37 @@ class ResumeTrainer:
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
             data_collator=DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=False),
-            compute_metrics=self.compute_metrics,
-            callbacks=[self.metrics_callback]
+            callbacks=[metrics_logger]
         )
         
-        # Train
         print("Starting training...")
         train_result = trainer.train()
         
-        # Save training metrics
-        metrics = {
-            'train_loss': self.metrics_callback.training_loss,
-            'val_loss': self.metrics_callback.validation_loss,
-            'learning_rates': self.metrics_callback.learning_rates,
-            'bleu_scores': self.metrics_callback.bleu_scores,
-            'rouge_scores': {
-                'rouge1': train_result.metrics['eval_rouge1'],
-                'rouge2': train_result.metrics['eval_rouge2'],
-                'rougeL': train_result.metrics['eval_rougeL']
-            }
-        }
-        
-        # Save metrics to file
-        with open(os.path.join(self.output_dir, 'training_metrics.json'), 'w') as f:
-            json.dump(metrics, f)
-        
-        # Generate and save visualizations
-        self._plot_metrics(metrics)
+        # Save final metrics
+        metrics_logger.save_final_metrics()
         
         # Save model and tokenizer
         self.model.save_pretrained(self.output_dir)
         self.tokenizer.save_pretrained(self.output_dir)
         
-        return metrics
-
-    def _plot_metrics(self, metrics):
-        """Generate and save visualization of training metrics"""
-        # Create directory for plots
-        plots_dir = os.path.join(self.output_dir, 'plots')
-        os.makedirs(plots_dir, exist_ok=True)
-        
-        # Plot training and validation loss
-        plt.figure(figsize=(10, 6))
-        plt.plot(metrics['train_loss'], label='Training Loss')
-        plt.plot(metrics['val_loss'], label='Validation Loss')
-        plt.title('Training and Validation Loss')
-        plt.xlabel('Steps')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.savefig(os.path.join(plots_dir, 'loss_curve.png'))
-        plt.close()
-        
-        # Plot learning rate
-        plt.figure(figsize=(10, 6))
-        plt.plot(metrics['learning_rates'])
-        plt.title('Learning Rate Schedule')
-        plt.xlabel('Steps')
-        plt.ylabel('Learning Rate')
-        plt.savefig(os.path.join(plots_dir, 'learning_rate.png'))
-        plt.close()
-        
-        # Plot ROUGE scores
-        plt.figure(figsize=(10, 6))
-        rouge_scores = metrics['rouge_scores']
-        plt.bar(rouge_scores.keys(), rouge_scores.values())
-        plt.title('ROUGE Scores')
-        plt.ylabel('Score')
-        plt.savefig(os.path.join(plots_dir, 'rouge_scores.png'))
-        plt.close()
+        return train_result, metrics_logger
 
 def main():
-    # Initialize wandb logging
-    wandb.login()
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     
-    # Create trainer instance
+    # Initialize trainer
     trainer = ResumeTrainer()
     
     # Prepare data
     train_data, val_data = trainer.prepare_data("resume_data.csv")
     
-    # Train model and get metrics
-    metrics = trainer.train(train_data, val_data)
+    # Train model
+    results, metrics_logger = trainer.train(train_data, val_data)
     
-    # Print final metrics
-    print("\nTraining completed. Final metrics:")
-    print(f"Final training loss: {metrics['train_loss'][-1]:.4f}")
-    print(f"Final validation loss: {metrics['val_loss'][-1]:.4f}")
-    print(f"ROUGE-1: {metrics['rouge_scores']['rouge1']:.4f}")
-    print(f"ROUGE-2: {metrics['rouge_scores']['rouge2']:.4f}")
-    print(f"ROUGE-L: {metrics['rouge_scores']['rougeL']:.4f}")
-    
-    # Close wandb run
-    wandb.finish()
+    print("\nTraining completed. Metrics have been logged to:", metrics_logger.log_file)
+    print("Final metrics have been saved to:", os.path.join(metrics_logger.log_dir, 'final_metrics.json'))
 
 if __name__ == "__main__":
     main()
