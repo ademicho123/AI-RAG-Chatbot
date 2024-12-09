@@ -1,51 +1,15 @@
 import streamlit as st
-from resume_model import ResumeGenerator
-import pypdf
-from io import BytesIO
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+import logging
+from resume_model import generate_section, generate_resume
 from dotenv import load_dotenv
 import os
 
-def create_pdf(resume_sections):
-    """Create a PDF from the resume sections"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    
-    # Create custom style for headers
-    styles.add(ParagraphStyle(
-        name='SectionHeader',
-        parent=styles['Heading1'],
-        fontSize=14,
-        spaceAfter=10,
-        textColor=colors.HexColor('#2c3e50')
-    ))
-    
-    # Build the PDF content
-    content = []
-    for section, text in resume_sections.items():
-        # Add section header
-        content.append(Paragraph(section, styles['SectionHeader']))
-        # Add section content
-        paragraphs = text.split('\n')
-        for para in paragraphs:
-            if para.strip():
-                content.append(Paragraph(para, styles['Normal']))
-        content.append(Spacer(1, 12))
-    
-    # Build the PDF
-    doc.build(content)
-    buffer.seek(0)
-    return buffer
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def main():
-    # Load environment variables
-    load_dotenv()
-    
     st.set_page_config(page_title="AI Resume Generator", layout="wide")
     
     # Add custom CSS
@@ -61,23 +25,20 @@ def main():
             font-weight: bold;
             margin-top: 1em;
         }
+        .error-box {
+            background-color: #ffeeee;
+            border: 1px solid #ff0000;
+            color: #ff0000;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
         </style>
     """, unsafe_allow_html=True)
     
     st.title("🎯 AI Resume Generator")
     
-    # Initialize session state for the resume generator
-    if 'resume_gen' not in st.session_state:
-        with st.spinner("Loading AI model... This may take a minute..."):
-            try:
-                st.session_state.resume_gen = ResumeGenerator()
-                st.success("Model loaded successfully!")
-            except Exception as e:
-                st.error(f"Error loading model: {str(e)}")
-                st.info("Please make sure you have a valid HUGGINGFACE_TOKEN in your .env file")
-                st.stop()
-    
-    # Create two columns for input
+    # Input columns
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -96,39 +57,51 @@ def main():
         - Mention preferred experience level
         - Add industry-specific requirements
         """)
-    
+
     if st.button("🚀 Generate Resume", type="primary"):
         if job_title:
             with st.spinner("Generating your professional resume..."):
                 try:
-                    resume_sections = st.session_state.resume_gen.generate_resume(
-                        job_title,
-                        additional_info
-                    )
+                    # Call the generate_resume function
+                    resume_sections = generate_resume(job_title, additional_info)
                     
-                    # Display generated resume
+                    if not resume_sections:
+                        st.markdown("""
+                        <div class="error-box">
+                        <strong>No resume sections were generated.</strong><br>
+                        Possible reasons:
+                        <ul>
+                        <li>API connection issue</li>
+                        <li>Invalid job title</li>
+                        <li>Temporary service disruption</li>
+                        </ul>
+                        Please check your API configuration and try again.
+                        </div>
+                        """, unsafe_allow_html=True)
+                        # Log the failure
+                        logger.warning(f"No resume sections generated for job title: {job_title}")
+                        return
+                    
+                    # Display the generated resume
                     st.markdown("## Generated Resume")
-                    
                     for section, content in resume_sections.items():
-                        if content.strip():
+                        if content.strip():  # Ensure non-empty content
                             st.markdown(f"<div class='section-header'>{section}</div>", 
-                                    unsafe_allow_html=True)
+                                        unsafe_allow_html=True)
                             st.write(content)
                             st.markdown("---")
-                    
-                    # Create PDF
-                    pdf_buffer = create_pdf(resume_sections)
-                    
-                    # Add download button
-                    st.download_button(
-                        label="📄 Download Resume as PDF",
-                        data=pdf_buffer,
-                        file_name=f"resume_{job_title.lower().replace(' ', '_')}.pdf",
-                        mime="application/pdf"
-                    )
-                    
                 except Exception as e:
-                    st.error(f"An error occurred while generating the resume: {str(e)}")
+                    # More detailed error handling
+                    error_message = str(e)
+                    st.markdown(f"""
+                    <div class="error-box">
+                    <strong>An error occurred while generating the resume:</strong><br>
+                    {error_message}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Log the full error for debugging
+                    logger.error(f"Resume generation error: {error_message}", exc_info=True)
         else:
             st.error("Please enter a job title")
 

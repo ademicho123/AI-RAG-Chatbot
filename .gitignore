@@ -1,0 +1,24 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Environment Variables
+.env
+.env.*
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# IDE Specific Files
+.vscode/
+*.code-workspace
+
+# Large Binary Files
+*.dll
+*.lib
+
+# Other Common Ignored Files
+*.log
+*.sqlite3
+.wandb

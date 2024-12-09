@@ -5,6 +5,7 @@ datasets
 pandas
 numpy
 scikit-learn
+together
 
 # NLP Metrics and Evaluation
 nltk
