@@ -1,40 +1,9 @@
-# Core ML and Data Processing
-torch
-transformers
-datasets
-pandas
-numpy
-scikit-learn
+langchain==0.0.329
+streamlit==1.27.2
+faiss-cpu==1.7.4
+python-dotenv==1.0.0
+tiktoken==0.5.1
+openai==0.27.10
 together
-
-# NLP Metrics and Evaluation
-nltk
-rouge-score
-sacrebleu
-
-# Web Application
-streamlit
-streamlit-extras
-
-# PDF Generation
-fpdf
-reportlab
-
-# Experiment Tracking and Visualization
-wandb
-matplotlib
-seaborn
-
-# Progress and Utils
-tqdm
-python-dotenv
-
-# Data Handling
-protobuf
-PyYAML
-
-# Optional: For development
-black
-flake8
-pytest
-accelerate
+fireworks==0.4.0
+sentence_transformers==2.2.2
