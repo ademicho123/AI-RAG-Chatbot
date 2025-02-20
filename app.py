@@ -15,13 +15,19 @@ def initialize_chatbot(file_path):
 
 st.title("AI RAG Chatbot")
 
-uploaded_file = st.file_uploader("Upload a text file for the knowledge base", type="txt")
+# Update the file_uploader to accept PDF, DOC, and TXT files
+uploaded_file = st.file_uploader(
+    "Upload a text, PDF, or DOC file for the knowledge base", 
+    type=["txt", "pdf", "doc", "docx"]
+)
 
 if uploaded_file:
-    with open("temp_knowledge_base.txt", "wb") as f:
+    file_extension = uploaded_file.name.split('.')[-1]
+    temp_file_path = f"temp_knowledge_base.{file_extension}"
+    with open(temp_file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-    chatbot = initialize_chatbot("temp_knowledge_base.txt")
+    chatbot = initialize_chatbot(temp_file_path)
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -37,4 +43,4 @@ if uploaded_file:
         st.chat_message("assistant").markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
 else:
-    st.write("Please upload a text file to start chatting!")
+    st.write("Please upload a text, PDF, or DOC file to start chatting!")

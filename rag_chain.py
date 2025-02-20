@@ -1,9 +1,24 @@
 from langchain.chains import RetrievalQA
-from langchain.llms import OpenAI, Gemini, Fireworks
 from dotenv import load_dotenv
 import os
+from together import Together
+from langchain_core.runnables import Runnable
+from typing import Dict, Any
 
 load_dotenv()
+
+class TogetherRunnable(Runnable):
+    def __init__(self, api_key: str, model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"):
+        self.client = Together(api_key=api_key)
+        self.model = model
+
+    def invoke(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        query = input.get("query", "")
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": query}],
+        )
+        return {"result": response.choices[0].message.content}
 
 class RAGChain:
     def __init__(self, vectorstore):
@@ -11,19 +26,19 @@ class RAGChain:
         self.llm = self.get_llm()
 
     def get_llm(self):
-        if os.getenv("OPENAI_API_KEY"):
-            return OpenAI(api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
-        elif os.getenv("GEMINI_API_KEY"):
-            return Gemini(api_key=os.getenv("GEMINI_API_KEY"), temperature=0)
-        elif os.getenv("FIREWORKS_API_KEY"):
-            return Fireworks(api_key=os.getenv("FIREWORKS_API_KEY"), temperature=0)
-        else:
-            raise ValueError("No valid API key found! Please set one in .env file.")
+        together_api_key = os.getenv("TOGETHER_API_KEY")
+        if not together_api_key:
+            raise ValueError("TOGETHER_API_KEY is missing from .env file!")
+        
+        # Initialize the custom Runnable
+        return TogetherRunnable(api_key=together_api_key)
 
     def create_chain(self):
         retriever = self.vectorstore.as_retriever(search_kwargs={"k": 3})
+        
+        # Create the RetrievalQA chain with the custom Runnable
         qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
+            llm=self.llm,  # Pass the custom Runnable here
             chain_type="stuff",
             retriever=retriever,
             return_source_documents=True
