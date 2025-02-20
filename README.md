@@ -1,4 +1,3 @@
-```markdown
 # AI RAG Chatbot
 
 This is a Retrieval-Augmented Generation (RAG) chatbot powered by LLaMA 3.3 70B using Together AI. It allows users to upload `.txt`, `.pdf`, or `.docx` files to create a knowledge base and chat with the AI.
@@ -15,7 +14,6 @@ Clone this repository and install the required dependencies:
 git clone <repository-url>
 cd <project-folder>
 pip install -r requirements.txt
-```
 
 ## Usage
 1. **Set up API Keys**  
