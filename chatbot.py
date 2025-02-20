@@ -4,7 +4,7 @@ class Chatbot:
 
     def get_response(self, user_input):
         try:
-            response = self.qa_chain({"query": user_input})
+            response = self.qa_chain.invoke({"query": user_input})
             return response['result']
         except Exception as e:
             return f"An error occurred: {str(e)}"
