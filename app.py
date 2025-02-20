@@ -1,109 +1,40 @@
 import streamlit as st
-import logging
-from resume_model import generate_section, generate_resume
-from dotenv import load_dotenv
-import os
+from document_processor import DocumentProcessor
+from embedding_indexer import EmbeddingIndexer
+from rag_chain import RAGChain
+from chatbot import Chatbot
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+@st.cache_resource
+def initialize_chatbot(file_path):
+    processor = DocumentProcessor(file_path)
+    texts = processor.load_and_split()
+    indexer = EmbeddingIndexer()
+    vectorstore = indexer.create_vectorstore(texts)
+    rag_chain = RAGChain(vectorstore)
+    return Chatbot(rag_chain.create_chain())
 
-def main():
-    st.set_page_config(page_title="AI Resume Generator", layout="wide")
-    
-    # Add custom CSS
-    st.markdown("""
-        <style>
-        .stApp {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .section-header {
-            color: #2c3e50;
-            font-size: 1.5em;
-            font-weight: bold;
-            margin-top: 1em;
-        }
-        .error-box {
-            background-color: #ffeeee;
-            border: 1px solid #ff0000;
-            color: #ff0000;
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    st.title("🎯 AI Resume Generator")
-    
-    # Input columns
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        job_title = st.text_input("Enter the job title:", placeholder="e.g., Senior Software Engineer")
-        additional_info = st.text_area(
-            "Additional information (optional):",
-            placeholder="Enter any specific requirements or preferences...",
-            height=100
-        )
-    
-    with col2:
-        st.markdown("### Tips for best results:")
-        st.markdown("""
-        - Be specific with the job title
-        - Include key skills in additional info
-        - Mention preferred experience level
-        - Add industry-specific requirements
-        """)
+st.title("AI RAG Chatbot")
 
-    if st.button("🚀 Generate Resume", type="primary"):
-        if job_title:
-            with st.spinner("Generating your professional resume..."):
-                try:
-                    # Call the generate_resume function
-                    resume_sections = generate_resume(job_title, additional_info)
-                    
-                    if not resume_sections:
-                        st.markdown("""
-                        <div class="error-box">
-                        <strong>No resume sections were generated.</strong><br>
-                        Possible reasons:
-                        <ul>
-                        <li>API connection issue</li>
-                        <li>Invalid job title</li>
-                        <li>Temporary service disruption</li>
-                        </ul>
-                        Please check your API configuration and try again.
-                        </div>
-                        """, unsafe_allow_html=True)
-                        # Log the failure
-                        logger.warning(f"No resume sections generated for job title: {job_title}")
-                        return
-                    
-                    # Display the generated resume
-                    st.markdown("## Generated Resume")
-                    for section, content in resume_sections.items():
-                        if content.strip():  # Ensure non-empty content
-                            st.markdown(f"<div class='section-header'>{section}</div>", 
-                                        unsafe_allow_html=True)
-                            st.write(content)
-                            st.markdown("---")
-                except Exception as e:
-                    # More detailed error handling
-                    error_message = str(e)
-                    st.markdown(f"""
-                    <div class="error-box">
-                    <strong>An error occurred while generating the resume:</strong><br>
-                    {error_message}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Log the full error for debugging
-                    logger.error(f"Resume generation error: {error_message}", exc_info=True)
-        else:
-            st.error("Please enter a job title")
+uploaded_file = st.file_uploader("Upload a text file for the knowledge base", type="txt")
 
-if __name__ == "__main__":
-    main()
+if uploaded_file:
+    with open("temp_knowledge_base.txt", "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    chatbot = initialize_chatbot("temp_knowledge_base.txt")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        st.chat_message(message["role"]).markdown(message["content"])
+
+    if prompt := st.chat_input("Ask a question"):
+        st.chat_message("user").markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        response = chatbot.get_response(prompt)
+        st.chat_message("assistant").markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+else:
+    st.write("Please upload a text file to start chatting!")
